@@ -60,7 +60,9 @@ jobs:
           SIGNING_ALIAS: ${{ secrets.SIGNING_ALIAS }}
         run: |
           chmod +x ./gradlew
-          ./gradlew app:assembleAppReleaseRelease --stacktrace
+          # appRelease = 正式包（DEBUG_LOG 编译期 false，零开销）
+          # appTrace   = 抓日志包（DEBUG_LOG 编译期 true）
+          ./gradlew app:assembleAppReleaseRelease app:assembleAppTraceRelease --stacktrace
 
       - name: Locate APKs
         if: always()

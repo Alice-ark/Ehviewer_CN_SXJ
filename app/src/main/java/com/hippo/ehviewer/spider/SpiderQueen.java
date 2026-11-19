@@ -33,6 +33,7 @@ import androidx.annotation.UiThread;
 
 import com.hippo.beerbelly.SimpleDiskCache;
 import com.hippo.ehviewer.Analytics;
+import com.hippo.ehviewer.BuildConfig;
 import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.GetText;
 import com.hippo.ehviewer.R;
@@ -110,7 +111,13 @@ public final class SpiderQueen implements Runnable {
     public static final String SPIDER_INFO_BACKUP_DIR = "backupDir";
     private static final String TAG = SpiderQueen.class.getSimpleName();
     private static final AtomicInteger sIdGenerator = new AtomicInteger();
-    private static final boolean DEBUG_LOG = true;
+    /**
+     * ★ 个性化改造：由 productFlavor 注入的 BuildConfig.DEBUG_LOG 控制。
+     * 它是编译期常量，appRelease 变体下为 false ⇒ javac 内联并整块删除 if 体；
+     * appTrace 变体下为 true ⇒ 12 个日志点全部生效。
+     * 不要改回字面量 true，否则正式包也会带日志。
+     */
+    private static final boolean DEBUG_LOG = BuildConfig.DEBUG_LOG;
     private static final boolean DEBUG_PTOKEN = true;
     private static final String[] URL_509_SUFFIX_ARRAY = {
             "/509.gif",

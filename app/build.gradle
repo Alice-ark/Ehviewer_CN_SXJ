@@ -40,6 +40,14 @@ android {
     productFlavors {
         appRelease {
             dimension "distribute"
+            // 正式包：DEBUG_LOG 编译期即为 false，javac 会把 if 体整块删除 ⇒ 零性能损失
+            buildConfigField 'boolean', 'DEBUG_LOG', 'false'
+        }
+        // ★ 个性化改造：trace 变体，专供抓日志
+        //   产物名 app-appTrace-release.apk，包名同为 com.xjs.ehviewer（可覆盖安装）
+        appTrace {
+            dimension "distribute"
+            buildConfigField 'boolean', 'DEBUG_LOG', 'true'
         }
 //        googlePlay {
 //            dimension "distribute"
