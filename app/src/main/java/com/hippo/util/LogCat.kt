@@ -78,11 +78,13 @@ object LogCat {
 
     /** 最后写出的文件（供 UI 显示路径） */
     @Volatile
-    var lastFile: File? = null
-        private set
+    private var lastFileRef: File? = null
 
-    val isRecording: Boolean
-        get() = worker?.isAlive == true
+    @JvmStatic
+    fun getLastFile(): File? = lastFileRef
+
+    @JvmStatic
+    fun isRecording(): Boolean = worker?.isAlive == true
 
     /**
      * 原版行为：一次性 dump 系统缓冲区。
@@ -215,7 +217,7 @@ object LogCat {
         val ts = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
         val f = File(dir, "logcat-stream-$ts-${seq++}.txt")
         currentFile = f
-        lastFile = f
+        lastFileRef = f
         return f
     }
 }
