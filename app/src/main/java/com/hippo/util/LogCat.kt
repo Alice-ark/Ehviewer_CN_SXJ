@@ -93,6 +93,18 @@ object LogCat {
     private var stopped = false
 
     /**
+     * 正在停止中（stopRecordingAsync 已发起但线程尚未退出）。
+     * 用来堵住「快速连点」竞态：A 线程把 stopped 置 true 后、worker 还没 join 完时，
+     * isRecording() 会返回 false，UI 就会误判成「未录制」而开始新一轮录制。
+     */
+    @Volatile
+    private var stopping = false
+
+    /** 是否正在停止（UI 应把按钮置灰，不接受新操作） */
+    @JvmStatic
+    fun isStopping(): Boolean = stopping
+
+    /**
      * 自动停止（达到 MAX_TOTAL_BYTES 或流意外结束）时的回调。
      * 由 UI 层注册，用来把「停止录制」文案刷回「导出日志」。
      * 回调发生在录制线程上，调用方需自行切回主线程。
@@ -175,8 +187,10 @@ object LogCat {
                 }
                 // ★ 若是达到 MAX_TOTAL_BYTES 自行退出，需要把状态改回「未录制」，
                 //   否则 UI 会一直显示「停止录制」。
+                //   同时把 worker 置空，让 isRecording() 立即返回 false。
                 if (!stopped) {
                     stopped = true
+                    worker = null
                     autoStopCallback?.run()
                 }
             }
@@ -201,8 +215,8 @@ object LogCat {
         worker?.interrupt()
         try {
             process?.destroy()
-        } catch (e: Exception) {
-            // 忽略：进程可能已退出
+        } catch (e: IllegalStateException) {
+            // 进程可能已退出，destroy 抛这个
         }
         // ★ 必须等待线程跑完 finally 里的 flush + close，
         //   否则调用方立刻读文件会读到被截断的尾巴。
@@ -221,8 +235,19 @@ object LogCat {
      */
     @JvmStatic
     fun stopRecordingAsync(onDone: Runnable?) {
+        synchronized(this) {
+            if (stopping) {
+                // 已在停止中，忽略重复请求
+                return
+            }
+            stopping = true
+        }
         val t = Thread({
-            stopRecording()
+            try {
+                stopRecording()
+            } finally {
+                stopping = false
+            }
             if (onDone != null) {
                 android.os.Handler(android.os.Looper.getMainLooper()).post(onDone)
             }
@@ -250,6 +275,11 @@ object LogCat {
                 written += n
                 totalBytes += n
 
+                // ★ 主动检查 stopped：input.read() 不响应 interrupt，
+                //   只靠 process.destroy() 让流 EOF 不可靠。读到字节后立刻自查。
+                if (stopped) {
+                    break
+                }
                 // 总量到顶 ⇒ 停录
                 if (totalBytes >= MAX_TOTAL_BYTES) {
                     break

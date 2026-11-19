@@ -88,6 +88,7 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
 
         // ★ 录制因达到容量上限等原因自行停止时，把文案刷回「导出日志」
         //   回调发生在录制线程，需切回主线程
+        //   注意：持有 this 引用，必须在 onDestroy 里清空，否则 Fragment 泄漏
         LogCat.setOnAutoStop((Runnable) () ->
                 new android.os.Handler(android.os.Looper.getMainLooper())
                         .post(this::refreshLogcatPref));
@@ -95,18 +96,29 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
         refreshLogcatPref();
     }
 
+    @Override
+    public void onDestroy() {
+        // ★ 断开单例对 Fragment 的强引用，避免内存泄漏
+        LogCat.setOnAutoStop(null);
+        super.onDestroy();
+    }
+
     /** 按录制状态刷新日志项的标题与摘要 */
     private void refreshLogcatPref() {
         if (dumpLogcatPref == null) {
             return;
         }
+        boolean stopping = LogCat.isStopping();
         boolean recording = LogCat.isRecording();
         dumpLogcatPref.setTitle(recording
                 ? R.string.settings_advanced_logcat_stop
                 : R.string.settings_advanced_dump_logcat);
-        dumpLogcatPref.setSummary(recording
-                ? R.string.settings_advanced_logcat_recording_summary
-                : R.string.settings_advanced_dump_logcat_summary);
+        dumpLogcatPref.setSummary(stopping
+                ? R.string.settings_advanced_logcat_stopping_summary
+                : recording ? R.string.settings_advanced_logcat_recording_summary
+                            : R.string.settings_advanced_dump_logcat_summary);
+        // 停止中置灰，避免重复点击
+        dumpLogcatPref.setEnabled(!stopping);
     }
 
     @Override
@@ -170,6 +182,11 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
         Resources resources = getResources();
         File dir = AppConfig.getExternalLogcatDir();
 
+        // ★ 正在停止中：忽略点击，防止「想把停止点成重新开始」的竞态
+        if (LogCat.isStopping()) {
+            return true;
+        }
+
         if (LogCat.isRecording()) {
             // ★ 异步停止：stopRecording 内部 join(2000) 会阻塞，不能放在主线程
             LogCat.stopRecordingAsync(() -> {
@@ -184,6 +201,8 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
                                   : a.getString(R.string.settings_advanced_dump_logcat_failed),
                         Toast.LENGTH_LONG).show();
             });
+            // 立刻置灰，避免下一帧到达前被再点一次
+            refreshLogcatPref();
             return true;
         }
 
