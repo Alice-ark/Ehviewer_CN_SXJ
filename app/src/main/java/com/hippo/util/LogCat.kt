@@ -93,6 +93,19 @@ object LogCat {
     private var stopped = false
 
     /**
+     * 自动停止（达到 MAX_TOTAL_BYTES 或流意外结束）时的回调。
+     * 由 UI 层注册，用来把「停止录制」文案刷回「导出日志」。
+     * 回调发生在录制线程上，调用方需自行切回主线程。
+     */
+    @Volatile
+    private var autoStopCallback: Runnable? = null
+
+    @JvmStatic
+    fun setOnAutoStop(cb: Runnable?) {
+        autoStopCallback = cb
+    }
+
+    /**
      * 原版行为：一次性 dump 系统缓冲区。
      * 保留以兼容外部调用；开启 DEBUG_LOG 时窗口只有 10~15 秒，建议改用流式。
      */
@@ -138,13 +151,14 @@ object LogCat {
         stopped = false
 
         val t = Thread({
+            var p: Process? = null
             try {
                 // -v threadtime : 带日期、精确到毫秒、含线程号
                 // -s TAG:D       : 只收指定 tag（Silence 其它）
                 val cmd = mutableListOf("logcat", "-v", "threadtime", "-s")
                 cmd.addAll(TAG_FILTER)
 
-                val p = ProcessBuilder(cmd).redirectErrorStream(true).start()
+                p = ProcessBuilder(cmd).redirectErrorStream(true).start()
                 process = p
                 streamLoop(p.inputStream)
             } catch (e: IOException) {
@@ -152,8 +166,19 @@ object LogCat {
             } catch (e: InterruptedException) {
                 // 正常停止
             } finally {
-                process?.destroy()
-                process = null
+                // ★ 只销毁本线程创建的进程。用共享成员 process 会在
+                //   快速连点（旧线程尚未退出、新线程已启动）时误杀新线程的进程。
+                p?.destroy()
+                // 只有当前登记的仍是自己时才清空，避免清掉新线程的设置
+                if (process === p) {
+                    process = null
+                }
+                // ★ 若是达到 MAX_TOTAL_BYTES 自行退出，需要把状态改回「未录制」，
+                //   否则 UI 会一直显示「停止录制」。
+                if (!stopped) {
+                    stopped = true
+                    autoStopCallback?.run()
+                }
             }
         }, "LogCatRecorder")
 
@@ -163,7 +188,12 @@ object LogCat {
         return true
     }
 
-    /** 停止录制并等待写盘完成（最多 2 秒）。 */
+    /**
+     * 停止录制并等待写盘完成（最多 2 秒）。
+     *
+     * ⚠️ 会阻塞调用线程最多 2 秒，**不要在主线程直接调用**。
+     * UI 请用 [stopRecordingAsync]。
+     */
     @JvmStatic
     @Synchronized
     fun stopRecording() {
@@ -183,6 +213,22 @@ object LogCat {
         }
         process = null
         worker = null
+    }
+
+    /**
+     * 异步停止，回调在主线程。
+     * UI 用这个，避免 join(2000) 把主线程卡死。
+     */
+    @JvmStatic
+    fun stopRecordingAsync(onDone: Runnable?) {
+        val t = Thread({
+            stopRecording()
+            if (onDone != null) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post(onDone)
+            }
+        }, "LogCatStopper")
+        t.isDaemon = true
+        t.start()
     }
 
     private fun streamLoop(input: InputStream) {

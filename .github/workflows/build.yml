@@ -40,6 +40,8 @@ jobs:
 
       # ★ 从 Secret 还原 keystore 到 runner 临时目录
       #   set +x 确保命令回显里不出现密钥材料
+      #   ⚠️ 空 secret（如外部 fork 的 PR）时不要生成文件：
+      #      printf '' | base64 -d 会产出 0 字节文件，Gradle 拿到空 keystore 会签名失败。
       - name: Decode keystore
         env:
           KEY_B64: ${{ secrets.SIGNING_KEY_BASE64 }}
@@ -47,9 +49,14 @@ jobs:
           set +x
           if [ -n "$KEY_B64" ]; then
             printf '%s' "$KEY_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
-            ls -la "$RUNNER_TEMP/release.jks"
+            if [ -s "$RUNNER_TEMP/release.jks" ]; then
+              echo "keystore decoded: $(stat -c%s "$RUNNER_TEMP/release.jks") bytes"
+            else
+              echo "::error::keystore 解码后为空，请检查 SIGNING_KEY_BASE64"
+              rm -f "$RUNNER_TEMP/release.jks"
+            fi
           else
-            echo "::warning::SIGNING_KEY_BASE64 未设置，将产出未签名包"
+            echo "::warning::SIGNING_KEY_BASE64 未设置（fork PR 属正常），将产出未签名包"
           fi
 
       - name: Build Release

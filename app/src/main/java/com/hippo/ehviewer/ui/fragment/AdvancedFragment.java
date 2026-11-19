@@ -85,6 +85,13 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
         clientData.setOnPreferenceClickListener(this);
 
         appLanguage.setOnPreferenceChangeListener(this);
+
+        // ★ 录制因达到容量上限等原因自行停止时，把文案刷回「导出日志」
+        //   回调发生在录制线程，需切回主线程
+        LogCat.setOnAutoStop((Runnable) () ->
+                new android.os.Handler(android.os.Looper.getMainLooper())
+                        .post(this::refreshLogcatPref));
+
         refreshLogcatPref();
     }
 
@@ -153,8 +160,9 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
      * ★ 个性化改造：日志按钮改为「开始录制 / 停止并导出」两态。
      *
      * 原来只有一次性 dump（logcat -d），只能拿到系统环形缓冲区里的 10~15 秒。
-     * 现在改成流式录制：只订阅 SpiderQueen / EhSSLSocketFactory / EhEngine，
+     * 现在改成流式录制：只订阅 SpiderQueen / EhSSLSocketFactory，
      * 边读边落盘，不受缓冲区大小限制；下载全程都能留下。
+     * （不订阅 EhEngine：它每页都打一次 api.php，会把关键记录挤走）
      *
      * 首次点击 = 开始录制；再次点击 = 停止并把文件路径告诉你。
      */
@@ -163,13 +171,19 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
         File dir = AppConfig.getExternalLogcatDir();
 
         if (LogCat.isRecording()) {
-            LogCat.stopRecording();
-            refreshLogcatPref();
-            File f = LogCat.getLastFile();
-            Toast.makeText(getActivity(),
-                    f != null ? resources.getString(R.string.settings_advanced_dump_logcat_to, f.getPath())
-                              : resources.getString(R.string.settings_advanced_dump_logcat_failed),
-                    Toast.LENGTH_LONG).show();
+            // ★ 异步停止：stopRecording 内部 join(2000) 会阻塞，不能放在主线程
+            LogCat.stopRecordingAsync(() -> {
+                refreshLogcatPref();
+                File f = LogCat.getLastFile();
+                Activity a = getActivity();
+                if (a == null) {
+                    return;
+                }
+                Toast.makeText(a,
+                        f != null ? a.getString(R.string.settings_advanced_dump_logcat_to, f.getPath())
+                                  : a.getString(R.string.settings_advanced_dump_logcat_failed),
+                        Toast.LENGTH_LONG).show();
+            });
             return true;
         }
 
