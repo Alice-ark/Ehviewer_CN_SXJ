@@ -118,7 +118,7 @@ object LogCat {
         if (dir == null) {
             return false
         }
-        if (isRecording) {
+        if (isRecording()) {
             return false
         }
         if (!FileUtils.ensureDirectory(dir)) {
