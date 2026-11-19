@@ -35,8 +35,11 @@ android {
                 storePassword ksStorePass
                 keyPassword ksKeyPass
                 keyAlias ksAlias
+                // V1 关（minSdk=23 时 AGP 默认会给 true，显式关掉）
                 v1SigningEnabled false
+                // V2 + V3 都开
                 v2SigningEnabled true
+                v3SigningEnabled true
             }
         }
     }
