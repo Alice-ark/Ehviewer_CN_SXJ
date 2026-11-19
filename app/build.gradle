@@ -35,11 +35,11 @@ android {
                 storePassword ksStorePass
                 keyPassword ksKeyPass
                 keyAlias ksAlias
-                // V1 关（minSdk=23 时 AGP 默认会给 true，显式关掉）
-                v1SigningEnabled false
-                // V2 + V3 都开
-                v2SigningEnabled true
-                v3SigningEnabled true
+                // ★ AGP 9.x 移除了 v3SigningEnabled（v1/v2SigningEnabled 仍在），
+                //   统一改用 enableVxSigning 属性名。
+                enableV1Signing = false   // V1 只对 Android 6 及以下有意义
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }
