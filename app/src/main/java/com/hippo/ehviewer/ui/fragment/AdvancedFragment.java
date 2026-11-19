@@ -130,20 +130,40 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
         return false;
     }
 
+    /**
+     * ★ 个性化改造：日志按钮改为「开始录制 / 停止并导出」两态。
+     *
+     * 原来只有一次性 dump（logcat -d），只能拿到系统环形缓冲区里的 10~15 秒。
+     * 现在改成流式录制：只订阅 SpiderQueen / EhSSLSocketFactory / EhEngine，
+     * 边读边落盘，不受缓冲区大小限制；下载全程都能留下。
+     *
+     * 首次点击 = 开始录制；再次点击 = 停止并把文件路径告诉你。
+     */
     private boolean dumpLogcat() {
-        boolean ok;
-        File file = null;
-        File dir = AppConfig.getExternalLogcatDir();
-        if (dir != null) {
-            file = new File(dir, "logcat-" + ReadableTime.getFilenamableTime(System.currentTimeMillis()) + ".txt");
-            ok = LogCat.save(file);
-        } else {
-            ok = false;
-        }
         Resources resources = getResources();
+        File dir = AppConfig.getExternalLogcatDir();
+
+        if (LogCat.isRecording()) {
+            LogCat.stopRecording();
+            File f = LogCat.getLastFile();
+            Toast.makeText(getActivity(),
+                    f != null ? resources.getString(R.string.settings_advanced_dump_logcat_to, f.getPath())
+                              : resources.getString(R.string.settings_advanced_dump_logcat_failed),
+                    Toast.LENGTH_LONG).show();
+            return true;
+        }
+
+        if (dir == null) {
+            Toast.makeText(getActivity(), resources.getString(R.string.settings_advanced_dump_logcat_failed),
+                    Toast.LENGTH_SHORT).show();
+            return true;
+        }
+
+        boolean ok = LogCat.startRecording(dir);
         Toast.makeText(getActivity(),
-                ok ? resources.getString(R.string.settings_advanced_dump_logcat_to, file.getPath()) :
-                        resources.getString(R.string.settings_advanced_dump_logcat_failed), Toast.LENGTH_SHORT).show();
+                ok ? resources.getString(R.string.settings_advanced_logcat_recording_started, dir.getPath())
+                   : resources.getString(R.string.settings_advanced_dump_logcat_failed),
+                Toast.LENGTH_LONG).show();
         return true;
     }
 

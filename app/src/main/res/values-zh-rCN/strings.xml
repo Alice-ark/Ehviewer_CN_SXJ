@@ -641,6 +641,7 @@
     <string name="settings_advanced_dump_logcat_summary">保存日志至外置存储器</string>
     <string name="settings_advanced_dump_logcat_failed">导出日志失败</string>
     <string name="settings_advanced_dump_logcat_to">已保存日志至 %s</string>
+    <string name="settings_advanced_logcat_recording_started">已开始录制日志，下载完成后再次点击此处导出。目录：%s</string>
     <string name="settings_advanced_clear_download_path_cache">清除画廊下载路径缓存</string>
     <string name="settings_advanced_clear_download_path_cache_summary">画廊下载路径可能出错了，导致重新下载。清除画廊下载路径缓存可能解决这个问题。</string>
     <string name="settings_advanced_clear_download_path_cache_message">清除画廊下载路径缓存？</string>

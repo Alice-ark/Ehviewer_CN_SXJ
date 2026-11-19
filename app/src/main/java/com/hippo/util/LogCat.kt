@@ -20,8 +20,74 @@ import com.hippo.lib.yorozuya.IOUtils
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
+/**
+ * 日志工具。
+ *
+ * 两种工作模式：
+ *  1. [save]（原版行为，保留兼容）—— `logcat -d` 一次性 dump 系统环形缓冲区。
+ *     问题：缓冲区全系统共享，DEBUG_LOG 开启后只能留 10~15 秒。
+ *  2. [startRecording] / [stopRecording]（★ 个性化改造，方案③）—— 流式捕获。
+ *     只订阅关心的 tag，边读边落盘，不受系统缓冲区大小限制。
+ *
+ * 流式模式的两条安全线：
+ *  - 单文件达到 [MAX_FILE_BYTES] 自动切新文件，避免单个文件过大打不开
+ *  - 总会话达到 [MAX_TOTAL_BYTES] 自动停录，避免写爆存储
+ */
 object LogCat {
+
+    /** 单文件上限（约 32 MB） */
+    private const val MAX_FILE_BYTES = 32L * 1024 * 1024
+
+    /** 整个录制会话上限（约 256 MB） */
+    private const val MAX_TOTAL_BYTES = 256L * 1024 * 1024
+
+    /**
+     * 订阅哪些 tag。
+     * `SpiderQueen`   —— 下载链路（Start download image N / succeed / End / targetImageUrl）
+     * `EhSSLSocketFactory` —— H@H 建连时打印 Host 与解析到的 IP，能看出指派到哪台机器
+     * `EhEngine`      —— 页面与 API 请求 URL
+     */
+    private val TAG_FILTER = arrayOf(
+        "SpiderQueen:D",
+        "EhSSLSocketFactory:D",
+        "EhEngine:D",
+    )
+
+    @Volatile
+    private var worker: Thread? = null
+
+    @Volatile
+    private var process: Process? = null
+
+    @Volatile
+    private var outDir: File? = null
+
+    @Volatile
+    private var seq = 0
+
+    @Volatile
+    private var totalBytes = 0L
+
+    @Volatile
+    private var currentFile: File? = null
+
+    /** 最后写出的文件（供 UI 显示路径） */
+    @Volatile
+    var lastFile: File? = null
+        private set
+
+    val isRecording: Boolean
+        get() = worker?.isAlive == true
+
+    /**
+     * 原版行为：一次性 dump 系统缓冲区。
+     * 保留以兼容外部调用；开启 DEBUG_LOG 时窗口只有 10~15 秒，建议改用流式。
+     */
     @JvmStatic
     fun save(file: File?): Boolean {
         if (!FileUtils.ensureFile(file)) {
@@ -36,5 +102,117 @@ object LogCat {
             e.printStackTrace()
             return false
         }
+    }
+
+    /**
+     * 开始流式录制。
+     *
+     * @param dir 输出目录，文件名为 `logcat-stream-<时间>-<序号>.txt`
+     * @return true 表示已启动；false 表示已在录制中或启动失败
+     */
+    @JvmStatic
+    @Synchronized
+    fun startRecording(dir: File?): Boolean {
+        if (dir == null) {
+            return false
+        }
+        if (isRecording) {
+            return false
+        }
+        if (!FileUtils.ensureDirectory(dir)) {
+            return false
+        }
+
+        outDir = dir
+        seq = 0
+        totalBytes = 0L
+
+        val t = Thread({
+            try {
+                // -v threadtime : 带日期、精确到毫秒、含线程号
+                // -s TAG:D       : 只收指定 tag（Silence 其它）
+                val cmd = mutableListOf("logcat", "-v", "threadtime", "-s")
+                cmd.addAll(TAG_FILTER)
+
+                val p = ProcessBuilder(cmd).redirectErrorStream(true).start()
+                process = p
+                streamLoop(p.inputStream)
+            } catch (e: IOException) {
+                e.printStackTrace()
+            } catch (e: InterruptedException) {
+                // 正常停止
+            } finally {
+                process?.destroy()
+                process = null
+            }
+        }, "LogCatRecorder")
+
+        t.isDaemon = true
+        worker = t
+        t.start()
+        return true
+    }
+
+    /** 停止录制并关闭当前文件。 */
+    @JvmStatic
+    @Synchronized
+    fun stopRecording() {
+        worker?.interrupt()
+        try {
+            process?.destroy()
+        } catch (e: Exception) {
+            // 忽略：进程可能已退出
+        }
+        process = null
+    }
+
+    private fun streamLoop(input: InputStream) {
+        var fos: FileOutputStream? = null
+        var written = 0L
+        try {
+            fos = FileOutputStream(openNextFile().also { written = 0L })
+            val buf = ByteArray(8192)
+            while (!Thread.currentThread().isInterrupted) {
+                val n = input.read(buf)
+                if (n < 0) {
+                    break
+                }
+                if (n == 0) {
+                    continue
+                }
+                fos.write(buf, 0, n)
+                written += n
+                totalBytes += n
+
+                // 总量到顶 ⇒ 停录
+                if (totalBytes >= MAX_TOTAL_BYTES) {
+                    break
+                }
+                // 单文件到顶 ⇒ 切新文件
+                if (written >= MAX_FILE_BYTES) {
+                    fos.flush()
+                    fos.close()
+                    fos = FileOutputStream(openNextFile().also { written = 0L })
+                }
+            }
+        } catch (e: IOException) {
+            e.printStackTrace()
+        } finally {
+            try {
+                fos?.flush()
+                fos?.close()
+            } catch (e: IOException) {
+                // 忽略
+            }
+        }
+    }
+
+    private fun openNextFile(): File {
+        val dir = outDir ?: throw IOException("output dir is null")
+        val ts = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        val f = File(dir, "logcat-stream-$ts-${seq++}.txt")
+        currentFile = f
+        lastFile = f
+        return f
     }
 }
