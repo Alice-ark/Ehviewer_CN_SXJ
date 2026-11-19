@@ -48,14 +48,15 @@ object LogCat {
 
     /**
      * 订阅哪些 tag。
-     * `SpiderQueen`   —— 下载链路（Start download image N / succeed / End / targetImageUrl）
-     * `EhSSLSocketFactory` —— H@H 建连时打印 Host 与解析到的 IP，能看出指派到哪台机器
-     * `EhEngine`      —— 页面与 API 请求 URL
+     * `SpiderQueen`         —— 下载链路（Start download image N / succeed / End / targetImageUrl）
+     * `EhSSLSocketFactory`  —— H@H 建连时打印 Host 与解析到的 IP，能看出指派到哪台机器
+     *
+     * 不订阅 `EhEngine`：实测它每页都会打一次 api.php（25 次 / 27 秒），
+     * 会把真正关键的 SpiderQueen 记录挤走。
      */
     private val TAG_FILTER = arrayOf(
         "SpiderQueen:D",
         "EhSSLSocketFactory:D",
-        "EhEngine:D",
     )
 
     @Volatile
@@ -73,9 +74,6 @@ object LogCat {
     @Volatile
     private var totalBytes = 0L
 
-    @Volatile
-    private var currentFile: File? = null
-
     /** 最后写出的文件（供 UI 显示路径） */
     @Volatile
     private var lastFileRef: File? = null
@@ -83,8 +81,16 @@ object LogCat {
     @JvmStatic
     fun getLastFile(): File? = lastFileRef
 
+    /**
+     * 是否正在录制。
+     * 用 stopped 标志而非只看 isAlive：interrupt() 后线程要过一会儿才真正退出，
+     * 用户快速连点两次时会误判，导致无法重新开始录制。
+     */
     @JvmStatic
-    fun isRecording(): Boolean = worker?.isAlive == true
+    fun isRecording(): Boolean = worker?.isAlive == true && !stopped
+
+    @Volatile
+    private var stopped = false
 
     /**
      * 原版行为：一次性 dump 系统缓冲区。
@@ -128,6 +134,8 @@ object LogCat {
         outDir = dir
         seq = 0
         totalBytes = 0L
+        lastFileRef = null
+        stopped = false
 
         val t = Thread({
             try {
@@ -155,17 +163,26 @@ object LogCat {
         return true
     }
 
-    /** 停止录制并关闭当前文件。 */
+    /** 停止录制并等待写盘完成（最多 2 秒）。 */
     @JvmStatic
     @Synchronized
     fun stopRecording() {
+        stopped = true
         worker?.interrupt()
         try {
             process?.destroy()
         } catch (e: Exception) {
             // 忽略：进程可能已退出
         }
+        // ★ 必须等待线程跑完 finally 里的 flush + close，
+        //   否则调用方立刻读文件会读到被截断的尾巴。
+        try {
+            worker?.join(2000)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
         process = null
+        worker = null
     }
 
     private fun streamLoop(input: InputStream) {
@@ -216,7 +233,6 @@ object LogCat {
         val dir = outDir ?: throw IOException("output dir is null")
         val ts = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
         val f = File(dir, "logcat-stream-$ts-${seq++}.txt")
-        currentFile = f
         lastFileRef = f
         return f
     }

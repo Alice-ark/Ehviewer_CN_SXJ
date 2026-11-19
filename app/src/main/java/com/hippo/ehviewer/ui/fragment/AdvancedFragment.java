@@ -39,7 +39,6 @@ import com.hippo.ehviewer.ui.wifi.WiFiClientActivity;
 import com.hippo.ehviewer.ui.wifi.WiFiServerActivity;
 import com.hippo.ehviewer.widget.ProgressHelper;
 import com.hippo.util.LogCat;
-import com.hippo.util.ReadableTime;
 
 import java.io.File;
 import java.util.Arrays;
@@ -63,12 +62,16 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
 
     private Context context;
 
+    /** ★ 个性化改造：日志按钮，用来动态显示「开始录制 / 停止录制」 */
+    private Preference dumpLogcatPref;
+
     @Override
     public void onCreatePreferences(@Nullable Bundle savedInstanceState, @Nullable String rootKey) {
         context = getContext();
         addPreferencesFromResource(R.xml.advanced_settings);
 
         Preference dumpLogcat = findPreference(KEY_DUMP_LOGCAT);
+        dumpLogcatPref = dumpLogcat;
         Preference clearMemoryCache = findPreference(KEY_CLEAR_MEMORY_CACHE);
         Preference appLanguage = findPreference(KEY_APP_LANGUAGE);
         Preference importData = findPreference(KEY_IMPORT_DATA);
@@ -82,11 +85,27 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
         clientData.setOnPreferenceClickListener(this);
 
         appLanguage.setOnPreferenceChangeListener(this);
+        refreshLogcatPref();
+    }
+
+    /** 按录制状态刷新日志项的标题与摘要 */
+    private void refreshLogcatPref() {
+        if (dumpLogcatPref == null) {
+            return;
+        }
+        boolean recording = LogCat.isRecording();
+        dumpLogcatPref.setTitle(recording
+                ? R.string.settings_advanced_logcat_stop
+                : R.string.settings_advanced_dump_logcat);
+        dumpLogcatPref.setSummary(recording
+                ? R.string.settings_advanced_logcat_recording_summary
+                : R.string.settings_advanced_dump_logcat_summary);
     }
 
     @Override
     public void onResume() {
         super.onResume();
+        refreshLogcatPref();
     }
 
     @Override
@@ -145,6 +164,7 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
 
         if (LogCat.isRecording()) {
             LogCat.stopRecording();
+            refreshLogcatPref();
             File f = LogCat.getLastFile();
             Toast.makeText(getActivity(),
                     f != null ? resources.getString(R.string.settings_advanced_dump_logcat_to, f.getPath())
@@ -160,6 +180,7 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
         }
 
         boolean ok = LogCat.startRecording(dir);
+        refreshLogcatPref();
         Toast.makeText(getActivity(),
                 ok ? resources.getString(R.string.settings_advanced_logcat_recording_started, dir.getPath())
                    : resources.getString(R.string.settings_advanced_dump_logcat_failed),
