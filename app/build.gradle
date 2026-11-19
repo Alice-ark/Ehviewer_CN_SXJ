@@ -15,6 +15,27 @@ android {
 //    buildToolsVersion "30.0.3"
 //    ndkVersion '26.1.10909125'
 
+    // ★ 个性化改造：从环境变量读取签名配置（CI 注入，本地无值则跳过签名）
+    def ksPath = System.getenv("SIGNING_KEY_PATH")
+    def ksStorePass = System.getenv("SIGNING_STORE_PASSWORD")
+    def ksKeyPass = System.getenv("SIGNING_KEY_PASSWORD")
+    def ksAlias = System.getenv("SIGNING_ALIAS")
+    def hasSigning = ksPath != null && file(ksPath).exists() &&
+                     ksStorePass != null && ksKeyPass != null && ksAlias != null
+
+    signingConfigs {
+        if (hasSigning) {
+            release {
+                storeFile file(ksPath)
+                storePassword ksStorePass
+                keyPassword ksKeyPass
+                keyAlias ksAlias
+                v1SigningEnabled false
+                v2SigningEnabled true
+            }
+        }
+    }
+
     flavorDimensions "distribute"
     productFlavors {
         appRelease {
@@ -59,6 +80,10 @@ android {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             buildConfigField 'String', 'FILE_PROVIDER_AUTHORITY', '"com.hippo.ehviewer.fileprovider"'
+            // ★ 个性化改造：有签名配置时挂上
+            if (hasSigning) {
+                signingConfig signingConfigs.release
+            }
         }
         debug {
             applicationIdSuffix ".debug1"

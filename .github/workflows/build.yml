@@ -21,13 +21,61 @@ jobs:
           distribution: 'temurin'
           java-version: 21
 
-      - name: Build
+      # ubuntu-latest 自带完整 Android SDK/NDK，不要用 setup-android@v3
+      # （它会判定预装 cmdline-tools 版本不对并重下，导致 sdkmanager 退出 1）
+      - name: Show toolchain
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/ndk" 2>/dev/null || echo "(no ndk dir)"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --version || true
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      # ★ 从 Secret 还原 keystore 到 runner 临时目录
+      #   set +x 确保命令回显里不出现密钥材料
+      - name: Decode keystore
+        env:
+          KEY_B64: ${{ secrets.SIGNING_KEY_BASE64 }}
+        run: |
+          set +x
+          if [ -n "$KEY_B64" ]; then
+            printf '%s' "$KEY_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            ls -la "$RUNNER_TEMP/release.jks"
+          else
+            echo "::warning::SIGNING_KEY_BASE64 未设置，将产出未签名包"
+          fi
+
+      - name: Build Release
+        env:
+          SIGNING_KEY_PATH: ${{ runner.temp }}/release.jks
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+          SIGNING_ALIAS: ${{ secrets.SIGNING_ALIAS }}
         run: |
           chmod +x ./gradlew
-          ./gradlew app:assembleDebug
-          
+          ./gradlew app:assembleAppReleaseRelease --stacktrace
+
+      - name: Locate APKs
+        if: always()
+        run: |
+          echo "=== APK files ==="
+          find ./app/build/outputs -name "*.apk" -printf "%p  %s bytes\n" || true
+
       - name: Upload Artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Build
+          name: apk-output
           path: ./app/build/outputs/apk/
+          if-no-files-found: warn
+
+      - name: Cleanup keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks" || true
