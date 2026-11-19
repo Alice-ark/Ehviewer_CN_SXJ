@@ -167,10 +167,11 @@ object LogCat {
     }
 
     private fun streamLoop(input: InputStream) {
-        var fos: FileOutputStream? = null
+        var out: FileOutputStream? = null
         var written = 0L
         try {
-            fos = FileOutputStream(openNextFile().also { written = 0L })
+            out = FileOutputStream(openNextFile())
+            var fos: FileOutputStream = out
             val buf = ByteArray(8192)
             while (!Thread.currentThread().isInterrupted) {
                 val n = input.read(buf)
@@ -192,15 +193,17 @@ object LogCat {
                 if (written >= MAX_FILE_BYTES) {
                     fos.flush()
                     fos.close()
-                    fos = FileOutputStream(openNextFile().also { written = 0L })
+                    fos = FileOutputStream(openNextFile())
+                    out = fos
+                    written = 0L
                 }
             }
         } catch (e: IOException) {
             e.printStackTrace()
         } finally {
             try {
-                fos?.flush()
-                fos?.close()
+                out?.flush()
+                out?.close()
             } catch (e: IOException) {
                 // 忽略
             }
